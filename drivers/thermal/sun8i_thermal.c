@@ -356,7 +356,7 @@ static int sun8i_ths_resource_init(struct ths_device *tmdev)
 		goto assert_reset;
 
 	/* Running at 4MHz */
-	ret = clk_set_rate(tmdev->ahb_clk, 4000000);
+	ret = clk_set_rate(tmdev->ahb_clk, 24000000);
 	if (ret)
 		goto bus_disable;
 
@@ -394,18 +394,18 @@ static int sun8i_h3_thermal_init(struct ths_device *tmdev)
 	 */
 	val = GENMASK(7 + tmdev->chip->sensor_num, 8);
 	regmap_write(tmdev->regmap, SUN8I_THS_IC,
-		     SUN50I_H6_THS_PC_TEMP_PERIOD(7) | val);
+		     SUN50I_H6_THS_PC_TEMP_PERIOD(116) | val);
 	/*
-	 * clkin = 4MHz
+	 * clkin = 24MHz
 	 * T acquire = clkin / (x + 1)
 	 *           = 20us
 	 * enable sensor
 	 */
 	regmap_write(tmdev->regmap, SUN8I_THS_CTRL0,
-		     SUN8I_THS_CTRL0_T_ACQ0(255));
+		     SUN8I_THS_CTRL0_T_ACQ0(479));
 	val = GENMASK(tmdev->chip->sensor_num - 1, 0);
 	regmap_write(tmdev->regmap, SUN8I_THS_CTRL2,
-		     SUN8I_THS_CTRL2_T_ACQ1(63) | val);
+		     SUN8I_THS_CTRL2_T_ACQ1(479) | val);
 
 	return 0;
 }
