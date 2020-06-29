@@ -3201,7 +3201,10 @@ void intel_dp_sink_set_decompression_state(struct intel_dp *intel_dp,
 /* If the sink supports it, try to set the power state appropriately */
 void intel_dp_sink_dpms(struct intel_dp *intel_dp, int mode)
 {
+	struct intel_digital_port *intel_dig_port = dp_to_dig_port(intel_dp);
+	struct drm_i915_private *dev_priv = to_i915(intel_dig_port->base.base.dev);
 	int ret, i;
+	u8 edp_oui[] = { 0x00, 0xaa, 0x01 };
 
 	/* Should have a valid DPCD by this point */
 	if (intel_dp->dpcd[DP_DPCD_REV] < 0x11)
@@ -3215,6 +3218,16 @@ void intel_dp_sink_dpms(struct intel_dp *intel_dp, int mode)
 					 DP_SET_POWER_D3);
 	} else {
 		struct intel_lspcon *lspcon = dp_to_lspcon(intel_dp);
+
+		/* Write the source OUI as early as possible */
+		if (intel_dp_is_edp(intel_dp)) {
+			ret = drm_dp_dpcd_write(&intel_dp->aux,
+						DP_SOURCE_OUI, edp_oui,
+						sizeof(edp_oui));
+			if (ret < 0)
+				drm_err(&dev_priv->drm,
+					"Failed to write eDP source OUI\n");
+		}
 
 		/*
 		 * When turning on, we need to retry for 1ms to give the sink
@@ -4407,6 +4420,8 @@ static void intel_dp_get_dsc_sink_cap(struct intel_dp *intel_dp)
 		DRM_DEBUG_KMS("FEC CAPABILITY: %x\n", intel_dp->fec_capable);
 	}
 }
+
+
 
 static void
 intel_edp_init_source_oui(struct intel_dp *intel_dp)
