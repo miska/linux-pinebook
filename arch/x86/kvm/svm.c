@@ -1886,7 +1886,7 @@ static struct page **sev_pin_memory(struct kvm *kvm, unsigned long uaddr,
 		return NULL;
 
 	/* Pin the user virtual address. */
-	npinned = get_user_pages_fast(uaddr, npages, FOLL_WRITE, pages);
+	npinned = get_user_pages_fast(uaddr, npages, write ? FOLL_WRITE : 0, pages);
 	if (npinned != npages) {
 		pr_err("SEV: Failure locking %lu pages.\n", npages);
 		goto err;
@@ -1933,14 +1933,6 @@ static void sev_clflush_pages(struct page *pages[], unsigned long npages)
 static void __unregister_enc_region_locked(struct kvm *kvm,
 					   struct enc_region *region)
 {
-	/*
-	 * The guest may change the memory encryption attribute from C=0 -> C=1
-	 * or vice versa for this memory range. Lets make sure caches are
-	 * flushed to ensure that guest data gets written into memory with
-	 * correct C-bit.
-	 */
-	sev_clflush_pages(region->pages, region->npages);
-
 	sev_unpin_memory(kvm, region->pages, region->npages);
 	list_del(&region->list);
 	kfree(region);
@@ -1951,6 +1943,10 @@ static struct kvm *svm_vm_alloc(void)
 	struct kvm_svm *kvm_svm = __vmalloc(sizeof(struct kvm_svm),
 					    GFP_KERNEL_ACCOUNT | __GFP_ZERO,
 					    PAGE_KERNEL);
+
+	if (!kvm_svm)
+		return NULL;
+
 	return &kvm_svm->kvm;
 }
 
@@ -1969,6 +1965,13 @@ static void sev_vm_destroy(struct kvm *kvm)
 		return;
 
 	mutex_lock(&kvm->lock);
+
+	/*
+	 * Ensure that all guest tagged cache entries are flushed before
+	 * releasing the pages back to the system for use. CLFLUSH will
+	 * not do this, so issue a WBINVD.
+	 */
+	wbinvd_on_all_cpus();
 
 	/*
 	 * if userspace was terminated before unregistering the memory regions
@@ -6312,7 +6315,8 @@ static void svm_handle_exit_irqoff(struct kvm_vcpu *vcpu,
 	enum exit_fastpath_completion *exit_fastpath)
 {
 	if (!is_guest_mode(vcpu) &&
-		to_svm(vcpu)->vmcb->control.exit_code == EXIT_REASON_MSR_WRITE)
+	    to_svm(vcpu)->vmcb->control.exit_code == SVM_EXIT_MSR &&
+	    to_svm(vcpu)->vmcb->control.exit_info_1)
 		*exit_fastpath = handle_fastpath_set_msr_irqoff(vcpu);
 }
 
@@ -7157,6 +7161,9 @@ static int svm_mem_enc_op(struct kvm *kvm, void __user *argp)
 	if (!svm_sev_enabled())
 		return -ENOTTY;
 
+	if (!argp)
+		return 0;
+
 	if (copy_from_user(&sev_cmd, argp, sizeof(struct kvm_sev_cmd)))
 		return -EFAULT;
 
@@ -7283,6 +7290,13 @@ static int svm_unregister_enc_region(struct kvm *kvm,
 		ret = -EINVAL;
 		goto failed;
 	}
+
+	/*
+	 * Ensure that all guest tagged cache entries are flushed before
+	 * releasing the pages back to the system for use. CLFLUSH will
+	 * not do this, so issue a WBINVD.
+	 */
+	wbinvd_on_all_cpus();
 
 	__unregister_enc_region_locked(kvm, region);
 
